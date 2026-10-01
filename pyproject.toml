@@ -1,0 +1,10 @@
+[project]
+name = "preferred-cover-art"
+version = "0.5.3"
+description = "Preferred Cover Art plugin for MusicBrainz Picard 3"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+
+[tool.ruff]
+line-length = 120
+target-version = "py38"
