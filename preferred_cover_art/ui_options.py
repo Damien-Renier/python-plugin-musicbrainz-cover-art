@@ -52,6 +52,11 @@ class Ui_PreferredCoverArtOptionsPage:
         self.square_tolerance.setSuffix(" %")
         self.square_tolerance.setMinimumWidth(110)
         dimensions_layout.addRow("Preferred ratio tolerance:", self.square_tolerance)
+
+        self.number_of_covers = QtWidgets.QSpinBox(dimensions_group)
+        self.number_of_covers.setRange(1, 10)
+        self.number_of_covers.setMinimumWidth(110)
+        dimensions_layout.addRow("Number of covers to return:", self.number_of_covers)
         layout.addWidget(dimensions_group)
 
         sources_group = QtWidgets.QGroupBox("Additional artwork sources", page)

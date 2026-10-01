@@ -15,7 +15,7 @@ PLUGIN_DESCRIPTION = (
     "Select preferred cover artwork from MusicBrainz, fanart.tv, and Discogs "
     "without changing the loaded release."
 )
-PLUGIN_VERSION = "0.6.0"
+PLUGIN_VERSION = "0.6.1"
 PLUGIN_API_VERSIONS = ["2.0", "2.1", "2.2", "2.3", "2.4", "2.5", "2.6", "2.7"]
 PLUGIN_LICENSE = "MIT"
 PLUGIN_LICENSE_URL = "https://opensource.org/licenses/MIT"

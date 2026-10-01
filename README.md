@@ -67,6 +67,10 @@ strong barcode or catalogue-number matches; title-only guessing is excluded.
 Keys are displayed in clear text on the options page, stored in Picard's
 configuration, and sent in HTTP headers rather than request URLs.
 
+**Number of covers to return** accepts values from 1 to 10 and defaults to 1.
+Ranked images are deduplicated by URL, queued as Front artwork, and receive the
+compact comment `Rank-SCORE = X-XX.XX`.
+
 ## Tests
 
 ```bash

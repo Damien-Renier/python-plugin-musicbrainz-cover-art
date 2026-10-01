@@ -1,0 +1,8 @@
+Preferred Cover Art 0.6.1
+
+What's new
+
+- Return between 1 and 10 ranked covers, configured from the plugin settings.
+- Add each unique image to Picard as Front artwork, with the best-ranked image first.
+- Display the compact `Rank-SCORE = X-XX.XX` comment on every returned cover.
+

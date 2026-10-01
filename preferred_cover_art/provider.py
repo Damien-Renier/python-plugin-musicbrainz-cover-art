@@ -49,6 +49,11 @@ DISCOGS_ENABLED_KEY = "preferred_cover_art_discogs_enabled"
 DISCOGS_API_KEY = "preferred_cover_art_discogs_api_key"
 FANART_ENABLED_KEY = "preferred_cover_art_fanart_enabled"
 FANART_API_KEY = "preferred_cover_art_fanart_api_key"
+NUMBER_OF_COVERS_KEY = "preferred_cover_art_number_of_covers"
+
+# Keep the user-visible comment in one place so its wording can be changed
+# without touching the queueing workflow.
+COVER_COMMENT_TEMPLATE = "Rank-SCORE = {rank}-{score:.2f}"
 
 
 def _debug_logs_enabled():
@@ -111,6 +116,7 @@ class PreferredCoverArtOptionsPage(OptionsPage):
         TextOption("setting", DISCOGS_API_KEY, ""),
         BoolOption("setting", FANART_ENABLED_KEY, False),
         TextOption("setting", FANART_API_KEY, ""),
+        IntOption("setting", NUMBER_OF_COVERS_KEY, 1),
     ]
 
     def __init__(self, parent=None):
@@ -149,6 +155,7 @@ class PreferredCoverArtOptionsPage(OptionsPage):
         self.ui.discogs_api_key.setText(config.setting[DISCOGS_API_KEY])
         self.ui.fanart_enabled.setChecked(config.setting[FANART_ENABLED_KEY])
         self.ui.fanart_api_key.setText(config.setting[FANART_API_KEY])
+        self.ui.number_of_covers.setValue(config.setting[NUMBER_OF_COVERS_KEY])
 
     def save(self):
         """Persist the current scoring preferences through Picard's config API."""
@@ -161,6 +168,7 @@ class PreferredCoverArtOptionsPage(OptionsPage):
         config.setting[DISCOGS_API_KEY] = self.ui.discogs_api_key.text().strip()
         config.setting[FANART_ENABLED_KEY] = self.ui.fanart_enabled.isChecked()
         config.setting[FANART_API_KEY] = self.ui.fanart_api_key.text().strip()
+        config.setting[NUMBER_OF_COVERS_KEY] = self.ui.number_of_covers.value()
 
 
 class PreferredCoverArtProvider(CoverArtProvider):
@@ -468,24 +476,34 @@ class PreferredCoverArtProvider(CoverArtProvider):
                         image.get("image") or "",
                     )
 
-            release, image, scores = ranked[0]
-            # Prefer CAA's bounded derivative to avoid downloading an oversized
-            # original; fall back progressively when that derivative is absent.
-            url = image.delivery_url if isinstance(image, ArtworkCandidate) else image.get("image")
-            if not url:
-                return
-            cover = CoverArtImage(url, types=["front"], comment=image.get("comment") or "")
-            cover.is_front = True
-            self.queue_put(cover)
-            if debug_logs:
-                log.debug(
-                "Preferred Cover Art: selected source %s release %s image %s with score %.3f; queued %s",
-                getattr(image, "source", "legacy"),
-                release.get("id") or "",
-                    image.get("id") or "",
-                    scores["total"],
-                    url,
-                )
+            limit = min(10, max(1, config.setting[NUMBER_OF_COVERS_KEY]))
+            queued_urls = set()
+            queued_count = 0
+            for release, image, scores in ranked:
+                # Prefer a bounded derivative when the source supplies one,
+                # while preserving the original URL in detailed Debug logs.
+                url = image.delivery_url if isinstance(image, ArtworkCandidate) else image.get("image")
+                if not url or url in queued_urls:
+                    continue
+                queued_count += 1
+                queued_urls.add(url)
+                comment = COVER_COMMENT_TEMPLATE.format(rank=queued_count, score=scores["total"])
+                cover = CoverArtImage(url, types=["front"], comment=comment)
+                cover.is_front = True
+                self.queue_put(cover)
+                if debug_logs:
+                    log.debug(
+                        "Preferred Cover Art: queued rank=%d source=%s release=%s image=%s "
+                        "score=%.3f url=%s",
+                        queued_count,
+                        getattr(image, "source", "legacy"),
+                        release.get("id") or "",
+                        image.get("id") or "",
+                        scores["total"],
+                        url,
+                    )
+                if queued_count >= limit:
+                    break
         except Exception as exc:
             self.error("Cover art scoring failed: %s" % exc)
         finally:

@@ -1,0 +1,115 @@
+name: release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: preferred-cover-art-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Publish plugin release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out the complete repository history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up the Picard 2.13 Python baseline
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.8"
+
+      - name: Read and validate the release version
+        id: version
+        shell: python
+        run: |
+          import os
+          import re
+          from pathlib import Path
+
+          project = Path("pyproject.toml").read_text(encoding="utf-8")
+          plugin = Path("preferred_cover_art/__init__.py").read_text(encoding="utf-8")
+
+          project_match = re.search(r'^version = "([^"]+)"$', project, re.MULTILINE)
+          plugin_match = re.search(r'^PLUGIN_VERSION = "([^"]+)"$', plugin, re.MULTILINE)
+          if not project_match or not plugin_match:
+              raise SystemExit("Unable to read the project and plugin versions.")
+
+          version = project_match.group(1)
+          if version != plugin_match.group(1):
+              raise SystemExit("pyproject.toml and PLUGIN_VERSION do not match.")
+          if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version):
+              raise SystemExit("The release version must use the X.Y.Z format.")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write("version={}\n".format(version))
+
+      - name: Run the regression suite
+        run: python -m unittest discover -s tests -v
+
+      - name: Build the Picard plugin archive
+        shell: python
+        run: |
+          from pathlib import Path
+          from zipfile import ZIP_DEFLATED, ZipFile
+
+          package = Path("preferred_cover_art")
+          archive = Path("preferred_cover_art.zip")
+          with ZipFile(archive, "w", compression=ZIP_DEFLATED, compresslevel=9) as output:
+              for source in sorted(package.rglob("*")):
+                  if source.is_file() and "__pycache__" not in source.parts:
+                      output.write(source, source.as_posix())
+
+      - name: Create or verify the immutable version tag
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if git rev-parse --quiet --verify "refs/tags/${VERSION}" >/dev/null; then
+            TAG_COMMIT="$(git rev-list -n 1 "${VERSION}")"
+            if [ "${TAG_COMMIT}" != "${GITHUB_SHA}" ]; then
+              echo "Tag ${VERSION} already points to another commit." >&2
+              exit 1
+            fi
+          else
+            git tag --annotate "${VERSION}" --message "Preferred Cover Art ${VERSION}" "${GITHUB_SHA}"
+            git push origin "refs/tags/${VERSION}"
+          fi
+
+      - name: Create or update the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if gh release view "${VERSION}" >/dev/null 2>&1; then
+            gh release edit "${VERSION}" \
+              --title "Preferred Cover Art ${VERSION}" \
+              --notes-file release.txt \
+              --latest
+            gh release upload "${VERSION}" preferred_cover_art.zip release.txt --clobber
+          else
+            gh release create "${VERSION}" \
+              preferred_cover_art.zip \
+              release.txt \
+              --verify-tag \
+              --title "Preferred Cover Art ${VERSION}" \
+              --notes-file release.txt \
+              --latest
+          fi
+
+      - name: Move LATEST to the published version
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          git tag --force LATEST "${VERSION}^{commit}"
+          git push --force origin refs/tags/LATEST
+

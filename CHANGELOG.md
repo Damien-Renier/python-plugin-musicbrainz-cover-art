@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.1
+
+- Add a configurable one-to-ten cover return count, queue ranked unique images
+  as Front artwork, and label them `Rank-SCORE = X-XX.XX`.
+
 ## 0.6.0
 
 - Introduce a source-neutral artwork model and an abstract asynchronous source
