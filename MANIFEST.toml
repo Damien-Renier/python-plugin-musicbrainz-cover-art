@@ -1,11 +1,11 @@
 uuid = "ff8bd2a4-a00e-4e63-9b83-95c66ebea458"
 name = "Preferred Cover Art"
-description = "Select front Cover Art Archive artwork from a preferred MusicBrainz release."
+description = "Select preferred artwork from Cover Art Archive, fanart.tv, and Discogs."
 long_description = """
-Uses a recording MBID to discover MusicBrainz releases, retrieves their Cover
-Art Archive metadata, and applies a weighted score for release type, original
-date, cover dimensions and ratio, recording length, country and medium. It
-queues the winning front image without replacing Picard's loaded metadata.
+Uses a recording MBID to discover MusicBrainz releases, collects normalized
+artwork candidates from Cover Art Archive and optional external sources, then
+applies deterministic relevance and provenance scoring. It queues the winning
+front image without replacing Picard's loaded metadata.
 """
 api = ["3.0"]
 authors = ["Damien Renier"]

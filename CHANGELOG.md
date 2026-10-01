@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.6.0
+
+- Introduce a source-neutral artwork model and an abstract asynchronous source
+  interface compatible with Picard 2.13.
+- Move Cover Art Archive retrieval into its own release-exact source adapter.
+- Add independently configurable fanart.tv and Discogs sources with masked API
+  key fields; both remain disabled by default.
+- Match fanart.tv artwork through MusicBrainz release groups and Discogs artwork
+  through exact URL relationships, barcodes, or catalogue numbers.
+- Keep credentials out of request URLs by attaching them as private headers to
+  Picard 2.13 web-service requests.
+- Reserve ten points for source and match provenance while retaining the
+  established release/image score as ninety percent of the final result.
+- Rank releases independently inside every enabled type using date, duration,
+  country, and medium, then query artwork only for the best three per group.
+- Deduplicate multitype releases and enforce a maximum of three CAA, fanart.tv,
+  and Discogs HTTP calls per enabled release type.
+- Display configured API keys in clear text and include every candidate image
+  URL with the complete score breakdown in Debug logs.
+
 ## 0.5.3
 
 - Reorganize options into native-style Various Artists, Cover dimensions and

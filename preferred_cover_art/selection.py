@@ -211,6 +211,15 @@ def choose_front_images(images: Iterable[dict[str, Any]]) -> list[dict[str, Any]
     return [image for image in images if is_front_image(image)]
 
 
+def _candidate_metric(image: Any, name: str, default: float) -> float:
+    """Return a normalized source metric from a model or legacy dictionary."""
+    try:
+        value = float(getattr(image, name, default))
+    except (TypeError, ValueError):
+        return default
+    return min(1.0, max(0.0, value))
+
+
 def score_release_image(
     release: dict[str, Any],
     image: dict[str, Any],
@@ -240,7 +249,16 @@ def score_release_image(
         "country": 6.0 * country_score(release, preferred_countries),
         "medium": 4.0 * medium_score(release, preferred_media),
     }
-    components["total"] = sum(components.values())
+    base_total = sum(components.values())
+    source_confidence = _candidate_metric(image, "source_confidence", 1.0)
+    match_confidence = _candidate_metric(image, "match_confidence", 1.0)
+    components["source_confidence"] = source_confidence
+    components["match_confidence"] = match_confidence
+    components["provenance"] = 10.0 * source_confidence * match_confidence
+    components["base_total"] = base_total
+    # Keep a 100-point total: the established relevance model contributes 90
+    # points and explicit source provenance contributes the remaining 10.
+    components["total"] = 0.9 * base_total + components["provenance"]
     return components
 
 
@@ -258,8 +276,8 @@ def rank_release_images(
     """Rank release/image pairs from strongest to weakest candidate.
 
     The date baseline is calculated only from releases that actually supplied
-    an eligible image.  Equal totals prefer approved artwork, then stable API
-    identifiers, making repeated runs deterministic.
+    an eligible image.  Equal totals prefer stronger matching and source
+    authority, followed by approval, popularity and stable identifiers.
     """
     pairs = list(release_images)
     # Image-less releases never reach this function and therefore cannot make
@@ -291,11 +309,72 @@ def rank_release_images(
         scored,
         key=lambda item: (
             -item[2]["total"],
+            -item[2]["match_confidence"],
+            -item[2]["source_confidence"],
             0 if item[1].get("approved") is True else 1,
+            -float(getattr(item[1], "popularity", 0.0) or 0.0),
             str(item[0].get("id") or ""),
             str(item[1].get("id") or item[1].get("image") or ""),
         ),
     )
+
+
+def shortlist_releases_by_type(
+    releases: Iterable[dict[str, Any]],
+    recording_id: str,
+    target_ms: Optional[int],
+    enabled_types: Sequence[str],
+    preferred_countries: Sequence[str],
+    preferred_media: Sequence[str],
+    limit_per_type: int = 3,
+) -> list[dict[str, Any]]:
+    """Select the strongest releases independently within each enabled type.
+
+    Each type has its own earliest-date baseline. Releases carrying multiple
+    enabled types compete in every matching group, then the combined shortlist
+    is deduplicated by MusicBrainz release MBID. An internal group marker is
+    attached to shallow release copies so source adapters can enforce per-group
+    request budgets without changing MusicBrainz metadata.
+    """
+    if limit_per_type <= 0:
+        return []
+
+    source_releases = list(releases)
+    selected = {}
+    selected_groups = {}
+    for enabled_type in enabled_types:
+        group = [
+            release
+            for release in source_releases
+            if any(_norm(value) == _norm(enabled_type) for value in release_types(release))
+        ]
+        known_dates = [_date_value(release.get("date")) for release in group]
+        earliest = min((value for value in known_dates if value is not None), default=None)
+        ranked = sorted(
+            group,
+            key=lambda release: (
+                -(
+                    25.0 * date_score(release, earliest)
+                    + 10.0 * length_score(release, recording_id, target_ms)
+                    + 6.0 * country_score(release, preferred_countries)
+                    + 4.0 * medium_score(release, preferred_media)
+                ),
+                str(release.get("id") or ""),
+            ),
+        )[:limit_per_type]
+        for release in ranked:
+            release_id = str(release.get("id") or "")
+            if not release_id:
+                continue
+            selected.setdefault(release_id, release)
+            selected_groups.setdefault(release_id, []).append(str(enabled_type))
+
+    shortlist = []
+    for release_id, release in selected.items():
+        annotated = dict(release)
+        annotated["_preferred_cover_art_groups"] = tuple(selected_groups[release_id])
+        shortlist.append(annotated)
+    return shortlist
 
 
 def choose_front_image(

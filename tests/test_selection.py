@@ -8,6 +8,7 @@ behavior, and invariants that could otherwise change the selected cover.
 from datetime import date
 import unittest
 
+from preferred_cover_art.artwork import ArtworkCandidate
 from preferred_cover_art.selection import (
     choose_front_images,
     cover_dimension_score,
@@ -17,6 +18,7 @@ from preferred_cover_art.selection import (
     ordered_preference_score,
     rank_release_images,
     release_type_score,
+    shortlist_releases_by_type,
 )
 
 
@@ -173,6 +175,93 @@ class ScoringTests(unittest.TestCase):
             0.10,
         )
         self.assertEqual(0.0, ranked[0][2]["date"])
+
+    def test_exact_source_wins_when_relevance_is_equal(self):
+        """Provenance breaks equal-quality candidates toward the exact release source."""
+        candidate = release("same", released="2000-01-01")
+        exact = ArtworkCandidate(
+            "cover_art_archive",
+            "exact",
+            "https://exact",
+            width=1200,
+            height=1200,
+            approved=True,
+            source_confidence=1.0,
+            match_confidence=1.0,
+        )
+        group_match = ArtworkCandidate(
+            "fanart_tv",
+            "group",
+            "https://group",
+            width=1200,
+            height=1200,
+            approved=True,
+            source_confidence=0.8,
+            match_confidence=0.75,
+        )
+        ranked = rank_release_images(
+            [(candidate, group_match), (candidate, exact)],
+            RID,
+            180000,
+            ("Album",),
+            ("GB",),
+            ("Digital Media",),
+            1200,
+            1200,
+            0.10,
+        )
+        self.assertIs(exact, ranked[0][1])
+        self.assertEqual(10.0, ranked[0][2]["provenance"])
+
+    def test_shortlist_keeps_three_releases_per_enabled_type(self):
+        """Every enabled type contributes at most three independently ranked releases."""
+        releases = [release("single-%d" % index, primary="Single") for index in range(4)]
+        releases.extend(release("album-%d" % index, primary="Album") for index in range(4))
+        shortlisted = shortlist_releases_by_type(
+            releases,
+            RID,
+            180000,
+            ("Single", "Album"),
+            ("GB",),
+            ("Digital Media",),
+        )
+        self.assertEqual(6, len(shortlisted))
+        self.assertEqual(
+            {"Single": 3, "Album": 3},
+            {
+                group: sum(group in item["_preferred_cover_art_groups"] for item in shortlisted)
+                for group in ("Single", "Album")
+            },
+        )
+
+    def test_shortlist_deduplicates_releases_selected_in_multiple_groups(self):
+        """A multitype release can win multiple groups but produces one API candidate."""
+        multitype = release("shared", primary="Album", secondary=["Soundtrack"])
+        shortlisted = shortlist_releases_by_type(
+            [multitype],
+            RID,
+            180000,
+            ("Album", "Soundtrack"),
+            ("GB",),
+            ("Digital Media",),
+        )
+        self.assertEqual(1, len(shortlisted))
+        self.assertEqual(("Album", "Soundtrack"), shortlisted[0]["_preferred_cover_art_groups"])
+
+    def test_shortlist_date_outweighs_medium_preference(self):
+        """The 25-point date component outweighs the four-point medium component."""
+        original = release("original", released="2000-01-01", fmt="Cassette")
+        preferred_medium = release("preferred-medium", released="2005-01-01", fmt="Digital Media")
+        shortlisted = shortlist_releases_by_type(
+            [preferred_medium, original],
+            RID,
+            180000,
+            ("Album",),
+            ("GB",),
+            ("Digital Media",),
+            limit_per_type=1,
+        )
+        self.assertEqual("original", shortlisted[0]["id"])
 
 
 if __name__ == "__main__":

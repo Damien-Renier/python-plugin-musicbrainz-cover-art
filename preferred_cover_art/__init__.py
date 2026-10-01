@@ -12,10 +12,10 @@ the implementation classes in ``provider.py``.
 PLUGIN_NAME = "Preferred Cover Art"
 PLUGIN_AUTHOR = "Damien Renier"
 PLUGIN_DESCRIPTION = (
-    "Select front Cover Art Archive artwork from a preferred MusicBrainz "
-    "release containing the current recording."
+    "Select preferred cover artwork from MusicBrainz, fanart.tv, and Discogs "
+    "without changing the loaded release."
 )
-PLUGIN_VERSION = "0.5.3"
+PLUGIN_VERSION = "0.6.0"
 PLUGIN_API_VERSIONS = ["2.0", "2.1", "2.2", "2.3", "2.4", "2.5", "2.6", "2.7"]
 PLUGIN_LICENSE = "MIT"
 PLUGIN_LICENSE_URL = "https://opensource.org/licenses/MIT"
@@ -51,9 +51,9 @@ else:
         _target_length_ms = _PreferredCoverArtProvider._target_length_ms
         queue_images = _PreferredCoverArtProvider.queue_images
         _releases_downloaded = _PreferredCoverArtProvider._releases_downloaded
-        _http_status = staticmethod(_PreferredCoverArtProvider._http_status)
-        _caa_candidate_downloaded = _PreferredCoverArtProvider._caa_candidate_downloaded
-        _finish_caa_collection = _PreferredCoverArtProvider._finish_caa_collection
+        _fetch_artwork_sources = _PreferredCoverArtProvider._fetch_artwork_sources
+        _source_completed = _PreferredCoverArtProvider._source_completed
+        _finish_artwork_collection = _PreferredCoverArtProvider._finish_artwork_collection
         _complete_provider = _PreferredCoverArtProvider._complete_provider
 
         NAME = _PreferredCoverArtProvider.NAME

@@ -1,10 +1,10 @@
-"""Picard 2 integration for selecting preferred Cover Art Archive artwork.
+"""Picard 2 integration for selecting preferred artwork across sources.
 
 The provider coordinates two asynchronous stages: discovering MusicBrainz
-releases for the current recording, then collecting front-image metadata from
-Cover Art Archive for every eligible release.  Once all requests complete, the
-pure scoring module ranks the combined release/image candidates and this module
-queues the winner through Picard's standard cover-art pipeline.
+releases for the current recording, then running every enabled artwork adapter.
+Once all sources complete, the pure scoring module ranks their normalized
+release/image candidates and this module queues the winner through Picard's
+standard cover-art pipeline.
 
 This file also owns the persisted plugin settings and their options-page adapter.
 Network callbacks must always converge on ``_complete_provider`` so Picard's
@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import json
 import logging
-from functools import partial
 from typing import Optional
 from urllib.parse import urlencode
 
@@ -24,20 +23,20 @@ from picard.coverart.image import CoverArtImage
 from picard.coverart.providers import CoverArtProvider
 from picard.config import BoolOption, IntOption, TextOption
 from picard.const import RELEASE_PRIMARY_GROUPS, RELEASE_SECONDARY_GROUPS, VARIOUS_ARTISTS_ID
-from PyQt5.QtNetwork import QNetworkRequest
 from picard.ui.options import OptionsPage
 
+from .artwork import ArtworkCandidate
 from .selection import (
-    choose_front_images,
     is_various_artists,
     rank_release_images,
     release_formats,
     release_types,
+    shortlist_releases_by_type,
 )
+from .sources import CoverArtArchiveSource, DiscogsSource, FanartTvSource
 from .ui_options import Ui_PreferredCoverArtOptionsPage
 
 MB_HOST = "musicbrainz.org"
-CAA_BASE = "https://coverartarchive.org"
 
 # The versioned key deliberately avoids a legacy QSettings value whose QString
 # representation cannot be converted safely to the current serialized list.
@@ -46,6 +45,10 @@ SQUARE_TOLERANCE_KEY = "preferred_cover_art_square_tolerance"
 PREFERRED_WIDTH_KEY = "preferred_cover_art_preferred_width"
 PREFERRED_HEIGHT_KEY = "preferred_cover_art_preferred_height"
 AVOID_VARIOUS_ARTISTS_KEY = "preferred_cover_art_avoid_various_artists"
+DISCOGS_ENABLED_KEY = "preferred_cover_art_discogs_enabled"
+DISCOGS_API_KEY = "preferred_cover_art_discogs_api_key"
+FANART_ENABLED_KEY = "preferred_cover_art_fanart_enabled"
+FANART_API_KEY = "preferred_cover_art_fanart_api_key"
 
 
 def _debug_logs_enabled():
@@ -104,6 +107,10 @@ class PreferredCoverArtOptionsPage(OptionsPage):
         IntOption("setting", PREFERRED_WIDTH_KEY, 1200),
         IntOption("setting", PREFERRED_HEIGHT_KEY, 1200),
         BoolOption("setting", AVOID_VARIOUS_ARTISTS_KEY, True),
+        BoolOption("setting", DISCOGS_ENABLED_KEY, False),
+        TextOption("setting", DISCOGS_API_KEY, ""),
+        BoolOption("setting", FANART_ENABLED_KEY, False),
+        TextOption("setting", FANART_API_KEY, ""),
     ]
 
     def __init__(self, parent=None):
@@ -138,6 +145,10 @@ class PreferredCoverArtOptionsPage(OptionsPage):
         self.ui.preferred_width.setValue(config.setting[PREFERRED_WIDTH_KEY])
         self.ui.preferred_height.setValue(config.setting[PREFERRED_HEIGHT_KEY])
         self.ui.avoid_various_artists.setChecked(config.setting[AVOID_VARIOUS_ARTISTS_KEY])
+        self.ui.discogs_enabled.setChecked(config.setting[DISCOGS_ENABLED_KEY])
+        self.ui.discogs_api_key.setText(config.setting[DISCOGS_API_KEY])
+        self.ui.fanart_enabled.setChecked(config.setting[FANART_ENABLED_KEY])
+        self.ui.fanart_api_key.setText(config.setting[FANART_API_KEY])
 
     def save(self):
         """Persist the current scoring preferences through Picard's config API."""
@@ -146,14 +157,18 @@ class PreferredCoverArtOptionsPage(OptionsPage):
         config.setting[PREFERRED_WIDTH_KEY] = self.ui.preferred_width.value()
         config.setting[PREFERRED_HEIGHT_KEY] = self.ui.preferred_height.value()
         config.setting[AVOID_VARIOUS_ARTISTS_KEY] = self.ui.avoid_various_artists.isChecked()
+        config.setting[DISCOGS_ENABLED_KEY] = self.ui.discogs_enabled.isChecked()
+        config.setting[DISCOGS_API_KEY] = self.ui.discogs_api_key.text().strip()
+        config.setting[FANART_ENABLED_KEY] = self.ui.fanart_enabled.isChecked()
+        config.setting[FANART_API_KEY] = self.ui.fanart_api_key.text().strip()
 
 
 class PreferredCoverArtProvider(CoverArtProvider):
-    """Asynchronously choose CAA artwork for the current recording.
+    """Asynchronously choose normalized artwork for the current recording.
 
-    The instance owns one logical request chain.  ``_caa_pending`` acts as a
-    fan-out barrier for per-release CAA calls, while ``_provider_request_active``
-    guards exactly-once release of Picard's manually retained request slot.
+    The instance owns one logical request chain. ``_source_pending`` acts as the
+    cross-source completion barrier, while ``_provider_request_active`` guards
+    exactly-once release of Picard's manually retained request slot.
     """
 
     NAME = "Preferred Cover Art"
@@ -215,7 +230,7 @@ class PreferredCoverArtProvider(CoverArtProvider):
 
         query = urlencode({
             "recording": recording_id,
-            "inc": "release-groups+media+recordings",
+            "inc": "artist-credits+labels+release-groups+media+recordings+url-rels",
             "limit": "100",
             "fmt": "json",
         })
@@ -312,109 +327,99 @@ class PreferredCoverArtProvider(CoverArtProvider):
                 self._complete_provider()
                 return
 
-            # One counter covers both successful callbacks and synchronous
-            # scheduling failures, allowing a single completion barrier.
-            self._caa_pending = len(releases)
-            self._caa_results = []
-            self._caa_failures = []
-            for release in releases:
-                release_id = release["id"]
-                if debug_logs:
-                    log.debug("Preferred Cover Art: requesting all CAA images for release %s", release_id)
-                try:
-                    self.album.tagger.webservice.get_url(
-                        url=f"{CAA_BASE}/release/{release_id}/",
-                        handler=partial(self._caa_candidate_downloaded, release),
-                        parse_response_type="json",
-                        priority=True,
-                        important=False,
+            type_settings = _configured_type_settings(config.setting[TYPE_PRIORITY_KEY])
+            enabled_types = tuple(value for value, enabled in type_settings if enabled)
+            shortlisted = shortlist_releases_by_type(
+                releases,
+                self._recording_id() or "",
+                self._target_length_ms(),
+                enabled_types,
+                tuple(config.setting["preferred_release_countries"]),
+                tuple(config.setting["preferred_release_formats"]),
+                limit_per_type=3,
+            )
+            if debug_logs:
+                group_counts = {
+                    release_type: sum(
+                        release_type in release.get("_preferred_cover_art_groups", ())
+                        for release in shortlisted
                     )
-                except Exception as exc:
-                    self._caa_failures.append("%s: %s" % (release_id, exc))
-                    self._caa_pending -= 1
-            if self._caa_pending == 0:
-                self._finish_caa_collection()
+                    for release_type in enabled_types
+                }
+                for release_type in enabled_types:
+                    log.debug(
+                        "Preferred Cover Art: shortlist type=%s retained=%d limit=3",
+                        release_type,
+                        group_counts[release_type],
+                    )
+                log.debug(
+                    "Preferred Cover Art: shortlist retained %d unique release(s) across %d enabled type(s)",
+                    len(shortlisted),
+                    len(enabled_types),
+                )
+            if not shortlisted:
+                self._complete_provider()
+                return
+
+            self._fetch_artwork_sources(shortlisted)
         except Exception as exc:
             self.error("Release selection failed: %s" % exc)
             self._complete_provider()
 
-    @staticmethod
-    def _http_status(http):
-        """Extract an integer HTTP status from a Qt network reply, if possible."""
-        try:
-            value = http.attribute(QNetworkRequest.HttpStatusCodeAttribute)
-            return int(value) if value is not None else None
-        except (AttributeError, TypeError, ValueError):
-            return None
+    def _fetch_artwork_sources(self, releases):
+        """Start every enabled source and initialize the shared completion barrier."""
+        webservice = self.album.tagger.webservice
+        sources = [CoverArtArchiveSource(webservice)]
+        if config.setting[FANART_ENABLED_KEY] and config.setting[FANART_API_KEY].strip():
+            sources.append(FanartTvSource(webservice, config.setting[FANART_API_KEY]))
+        if config.setting[DISCOGS_ENABLED_KEY] and config.setting[DISCOGS_API_KEY].strip():
+            sources.append(DiscogsSource(webservice, config.setting[DISCOGS_API_KEY]))
 
-    def _caa_candidate_downloaded(self, release, data, http, error):
-        """Collect front images returned for one release.
+        self._artwork_sources = sources
+        self._source_pending = len(sources)
+        self._source_results = []
+        self._source_failures = []
+        for source in sources:
+            try:
+                source.fetch(
+                    releases,
+                    lambda candidates, failures, name=source.NAME: self._source_completed(
+                        name, candidates, failures
+                    ),
+                )
+            except Exception as exc:
+                self._source_completed(source.NAME, [], ["%s: %s" % (source.NAME, exc)])
 
-        A 404 is a valid “no cover art” result.  Other CAA failures invalidate
-        the complete ranking because scoring a partial candidate set could pick
-        a result that would not have won had all requests succeeded.
-        """
-        release_id = release.get("id") or ""
-        try:
-            status = self._http_status(http)
-            if error and status != 404:
-                message = http.errorString() if http is not None else str(error)
-                self._caa_failures.append("%s: %s" % (release_id, message))
-                log.error(
-                    "Preferred Cover Art: transient CAA error for release %s; 0 images: %s",
-                    release_id,
-                    message,
-                )
-                return
-            images = data.get("images", []) if isinstance(data, dict) else []
-            debug_logs = _debug_logs_enabled()
-            if debug_logs:
-                log.debug(
-                    "Preferred Cover Art: CAA release %s returned %d image(s)",
-                    release_id,
-                    len(images),
-                )
-                for index, candidate in enumerate(images, 1):
-                    log.debug(
-                        "Preferred Cover Art: CAA release %s image %d/%d: id=%s types=%s approved=%s size=%sx%s url=%s",
-                        release_id,
-                        index,
-                        len(images),
-                        candidate.get("id") or "",
-                        ", ".join(candidate.get("types") or []),
-                        candidate.get("approved"),
-                        candidate.get("width") or "?",
-                        candidate.get("height") or "?",
-                        candidate.get("image") or "",
-                    )
-            fronts = choose_front_images(images)
-            if debug_logs:
-                log.debug(
-                    "Preferred Cover Art: hard filter [front image] for release %s: %d -> %d images",
-                    release_id,
-                    len(images),
-                    len(fronts),
-                )
-            self._caa_results.extend((release, image) for image in fronts)
-        except Exception as exc:
-            self._caa_failures.append("%s: %s" % (release_id, exc))
-        finally:
-            # Every scheduled request reaches this barrier exactly once,
-            # including parsing and logging failures inside the callback.
-            self._caa_pending -= 1
-            if self._caa_pending == 0:
-                self._finish_caa_collection()
+    def _source_completed(self, source_name, candidates, failures):
+        """Merge one source result and finish when all adapters have completed."""
+        self._source_results.extend(candidates)
+        self._source_failures.extend(failures)
+        if _debug_logs_enabled():
+            log.debug(
+                "Preferred Cover Art: source=%s candidates=%d failures=%d",
+                source_name,
+                len(candidates),
+                len(failures),
+            )
+        self._source_pending -= 1
+        if self._source_pending == 0:
+            self._finish_artwork_collection()
 
-    def _finish_caa_collection(self):
-        """Rank the complete candidate set and enqueue its winning front image."""
+    def _finish_artwork_collection(self):
+        """Rank the unified candidate set and enqueue its winning front image."""
         try:
-            if self._caa_failures:
+            if self._source_failures and not self._source_results:
                 self.error(
-                    "Preferred Cover Art: temporary Cover Art Archive error; "
-                    "0 images retrieved: %s" % "; ".join(self._caa_failures)
+                    "Preferred Cover Art: artwork sources failed; "
+                    "0 images retrieved: %s" % "; ".join(self._source_failures)
                 )
                 return
-            if not self._caa_results:
+            if self._source_failures:
+                log.warning(
+                    "Preferred Cover Art: some artwork sources failed: %s",
+                    "; ".join(self._source_failures),
+                )
+            if not self._source_results:
                 if _debug_logs_enabled():
                     log.debug("Preferred Cover Art: no candidate release has a front image")
                 return
@@ -422,7 +427,7 @@ class PreferredCoverArtProvider(CoverArtProvider):
             type_settings = _configured_type_settings(config.setting[TYPE_PRIORITY_KEY])
             enabled_types = tuple(value for value, enabled in type_settings if enabled)
             ranked = rank_release_images(
-                self._caa_results,
+                self._source_results,
                 self._recording_id() or "",
                 self._target_length_ms(),
                 enabled_types,
@@ -441,26 +446,32 @@ class PreferredCoverArtProvider(CoverArtProvider):
             if debug_logs:
                 for position, (release, image, scores) in enumerate(ranked, 1):
                     log.debug(
-                        "Preferred Cover Art: score %d/%d release=%s image=%s total=%.3f "
-                        "T=%.3f D=%.3f C=%.3f L=%.3f P=%.3f M=%.3f",
+                        "Preferred Cover Art: score %d/%d source=%s release=%s image=%s "
+                        "total=%.3f base=%.3f provenance=%.3f T=%.3f D=%.3f C=%.3f "
+                        "L=%.3f P=%.3f M=%.3f SC=%.3f MC=%.3f url=%s",
                         position,
                         len(ranked),
+                        getattr(image, "source", "legacy"),
                         release.get("id") or "",
                         image.get("id") or image.get("image") or "",
                         scores["total"],
+                        scores["base_total"],
+                        scores["provenance"],
                         scores["release_type"],
                         scores["date"],
                         scores["cover_dimension"],
                         scores["length"],
                         scores["country"],
                         scores["medium"],
+                        scores["source_confidence"],
+                        scores["match_confidence"],
+                        image.get("image") or "",
                     )
 
             release, image, scores = ranked[0]
             # Prefer CAA's bounded derivative to avoid downloading an oversized
             # original; fall back progressively when that derivative is absent.
-            thumbnails = image.get("thumbnails") or {}
-            url = thumbnails.get("1200") or thumbnails.get("large") or image.get("image")
+            url = image.delivery_url if isinstance(image, ArtworkCandidate) else image.get("image")
             if not url:
                 return
             cover = CoverArtImage(url, types=["front"], comment=image.get("comment") or "")
@@ -468,8 +479,9 @@ class PreferredCoverArtProvider(CoverArtProvider):
             self.queue_put(cover)
             if debug_logs:
                 log.debug(
-                    "Preferred Cover Art: selected release %s image %s with score %.3f; queued %s",
-                    release.get("id") or "",
+                "Preferred Cover Art: selected source %s release %s image %s with score %.3f; queued %s",
+                getattr(image, "source", "legacy"),
+                release.get("id") or "",
                     image.get("id") or "",
                     scores["total"],
                     url,
