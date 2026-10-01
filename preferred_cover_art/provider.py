@@ -50,6 +50,7 @@ DISCOGS_API_KEY = "preferred_cover_art_discogs_api_key"
 FANART_ENABLED_KEY = "preferred_cover_art_fanart_enabled"
 FANART_API_KEY = "preferred_cover_art_fanart_api_key"
 NUMBER_OF_COVERS_KEY = "preferred_cover_art_number_of_covers"
+MAX_CALLS_PER_TYPE_KEY = "preferred_cover_art_max_calls_per_type"
 
 # Keep the user-visible comment in one place so its wording can be changed
 # without touching the queueing workflow.
@@ -117,6 +118,7 @@ class PreferredCoverArtOptionsPage(OptionsPage):
         BoolOption("setting", FANART_ENABLED_KEY, False),
         TextOption("setting", FANART_API_KEY, ""),
         IntOption("setting", NUMBER_OF_COVERS_KEY, 1),
+        IntOption("setting", MAX_CALLS_PER_TYPE_KEY, 3),
     ]
 
     def __init__(self, parent=None):
@@ -156,6 +158,7 @@ class PreferredCoverArtOptionsPage(OptionsPage):
         self.ui.fanart_enabled.setChecked(config.setting[FANART_ENABLED_KEY])
         self.ui.fanart_api_key.setText(config.setting[FANART_API_KEY])
         self.ui.number_of_covers.setValue(config.setting[NUMBER_OF_COVERS_KEY])
+        self.ui.max_calls_per_type.setValue(config.setting[MAX_CALLS_PER_TYPE_KEY])
 
     def save(self):
         """Persist the current scoring preferences through Picard's config API."""
@@ -169,6 +172,7 @@ class PreferredCoverArtOptionsPage(OptionsPage):
         config.setting[FANART_ENABLED_KEY] = self.ui.fanart_enabled.isChecked()
         config.setting[FANART_API_KEY] = self.ui.fanart_api_key.text().strip()
         config.setting[NUMBER_OF_COVERS_KEY] = self.ui.number_of_covers.value()
+        config.setting[MAX_CALLS_PER_TYPE_KEY] = self.ui.max_calls_per_type.value()
 
 
 class PreferredCoverArtProvider(CoverArtProvider):
@@ -337,6 +341,7 @@ class PreferredCoverArtProvider(CoverArtProvider):
 
             type_settings = _configured_type_settings(config.setting[TYPE_PRIORITY_KEY])
             enabled_types = tuple(value for value, enabled in type_settings if enabled)
+            max_calls_per_type = min(10, max(1, config.setting[MAX_CALLS_PER_TYPE_KEY]))
             shortlisted = shortlist_releases_by_type(
                 releases,
                 self._recording_id() or "",
@@ -344,7 +349,7 @@ class PreferredCoverArtProvider(CoverArtProvider):
                 enabled_types,
                 tuple(config.setting["preferred_release_countries"]),
                 tuple(config.setting["preferred_release_formats"]),
-                limit_per_type=3,
+                limit_per_type=max_calls_per_type,
             )
             if debug_logs:
                 group_counts = {
@@ -356,9 +361,10 @@ class PreferredCoverArtProvider(CoverArtProvider):
                 }
                 for release_type in enabled_types:
                     log.debug(
-                        "Preferred Cover Art: shortlist type=%s retained=%d limit=3",
+                        "Preferred Cover Art: shortlist type=%s retained=%d limit=%d",
                         release_type,
                         group_counts[release_type],
+                        max_calls_per_type,
                     )
                 log.debug(
                     "Preferred Cover Art: shortlist retained %d unique release(s) across %d enabled type(s)",
@@ -377,11 +383,24 @@ class PreferredCoverArtProvider(CoverArtProvider):
     def _fetch_artwork_sources(self, releases):
         """Start every enabled source and initialize the shared completion barrier."""
         webservice = self.album.tagger.webservice
+        max_calls_per_type = min(10, max(1, config.setting[MAX_CALLS_PER_TYPE_KEY]))
         sources = [CoverArtArchiveSource(webservice)]
         if config.setting[FANART_ENABLED_KEY] and config.setting[FANART_API_KEY].strip():
-            sources.append(FanartTvSource(webservice, config.setting[FANART_API_KEY]))
+            sources.append(
+                FanartTvSource(
+                    webservice,
+                    config.setting[FANART_API_KEY],
+                    max_calls_per_type=max_calls_per_type,
+                )
+            )
         if config.setting[DISCOGS_ENABLED_KEY] and config.setting[DISCOGS_API_KEY].strip():
-            sources.append(DiscogsSource(webservice, config.setting[DISCOGS_API_KEY]))
+            sources.append(
+                DiscogsSource(
+                    webservice,
+                    config.setting[DISCOGS_API_KEY],
+                    max_calls_per_type=max_calls_per_type,
+                )
+            )
 
         self._artwork_sources = sources
         self._source_pending = len(sources)

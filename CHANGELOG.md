@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.2
+
+- Add a Scoring settings group containing configurable per-provider/per-type
+  request limits and the number of covers returned per song.
+- Apply the configured request limit consistently to Cover Art Archive,
+  fanart.tv, and Discogs instead of using the previous fixed limit of three.
+
 ## 0.6.1
 
 - Add a configurable one-to-ten cover return count, queue ranked unique images

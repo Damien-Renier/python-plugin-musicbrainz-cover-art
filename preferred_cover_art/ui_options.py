@@ -53,11 +53,27 @@ class Ui_PreferredCoverArtOptionsPage:
         self.square_tolerance.setMinimumWidth(110)
         dimensions_layout.addRow("Preferred ratio tolerance:", self.square_tolerance)
 
-        self.number_of_covers = QtWidgets.QSpinBox(dimensions_group)
+        layout.addWidget(dimensions_group)
+
+        scoring_group = QtWidgets.QGroupBox("Scoring", page)
+        scoring_layout = QtWidgets.QFormLayout(scoring_group)
+        scoring_layout.setHorizontalSpacing(24)
+        scoring_layout.setVerticalSpacing(12)
+        scoring_layout.setFieldGrowthPolicy(QtWidgets.QFormLayout.FieldsStayAtSizeHint)
+
+        self.max_calls_per_type = QtWidgets.QSpinBox(scoring_group)
+        self.max_calls_per_type.setRange(1, 10)
+        self.max_calls_per_type.setMinimumWidth(110)
+        scoring_layout.addRow(
+            "Maximum calls per provider and enabled type:",
+            self.max_calls_per_type,
+        )
+
+        self.number_of_covers = QtWidgets.QSpinBox(scoring_group)
         self.number_of_covers.setRange(1, 10)
         self.number_of_covers.setMinimumWidth(110)
-        dimensions_layout.addRow("Number of covers to return:", self.number_of_covers)
-        layout.addWidget(dimensions_group)
+        scoring_layout.addRow("Covers to return per song:", self.number_of_covers)
+        layout.addWidget(scoring_group)
 
         sources_group = QtWidgets.QGroupBox("Additional artwork sources", page)
         sources_layout = QtWidgets.QVBoxLayout(sources_group)
@@ -94,7 +110,7 @@ class Ui_PreferredCoverArtOptionsPage:
         types_layout.setSpacing(8)
 
         note = QtWidgets.QLabel(
-            "Checked types receive a score based on their order; unchecked types receive zero. "
+            "Checked types receive a score based on their order; unchecked types are not considered. "
             "Country and medium priorities come from Metadata > Preferred Releases.",
             types_group,
         )

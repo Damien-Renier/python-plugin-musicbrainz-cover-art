@@ -171,10 +171,11 @@ class FanartTvSource(_FanOutSource):
 
     NAME = "fanart_tv"
 
-    def __init__(self, webservice, api_key: str):
-        """Initialize the adapter with a fanart.tv project API key."""
+    def __init__(self, webservice, api_key: str, max_calls_per_type: int = 3):
+        """Initialize the adapter with its API key and per-type call budget."""
         super().__init__(webservice)
         self.api_key = api_key.strip()
+        self.max_calls_per_type = max(1, int(max_calls_per_type))
         self._releases_by_group = {}
         self._group_budget = {}
 
@@ -191,7 +192,7 @@ class FanartTvSource(_FanOutSource):
                 for artist_id in _artist_ids(release):
                     artist_groups.setdefault(artist_id, set()).update(shortlist_groups)
         self._group_budget = {
-            group: 3
+            group: self.max_calls_per_type
             for groups in artist_groups.values()
             for group in groups
         }
@@ -324,10 +325,11 @@ class DiscogsSource(_FanOutSource):
 
     NAME = "discogs"
 
-    def __init__(self, webservice, api_key: str):
-        """Initialize the adapter with a Discogs personal access token."""
+    def __init__(self, webservice, api_key: str, max_calls_per_type: int = 3):
+        """Initialize the adapter with its token and per-type call budget."""
         super().__init__(webservice)
         self.api_key = api_key.strip()
+        self.max_calls_per_type = max(1, int(max_calls_per_type))
         self._group_budget = {}
 
     def fetch(self, releases: Iterable[dict[str, Any]], completed: CompletionCallback) -> None:
@@ -338,7 +340,7 @@ class DiscogsSource(_FanOutSource):
             for release in release_list
             for group in release.get("_preferred_cover_art_groups", ())
         }
-        self._group_budget = {group: 3 for group in groups}
+        self._group_budget = {group: self.max_calls_per_type for group in groups}
         linked = [(release, discogs_release_id(release)) for release in release_list]
         linked = [(release, release_id) for release, release_id in linked if release_id]
         linked_release_ids = {release.get("id") for release, _discogs_id in linked}

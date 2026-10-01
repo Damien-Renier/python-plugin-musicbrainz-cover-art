@@ -1,6 +1,6 @@
 [project]
 name = "preferred-cover-art"
-version = "0.6.1"
+version = "0.6.2"
 description = "Preferred Cover Art plugin for MusicBrainz Picard 2.13"
 requires-python = ">=3.8"
 license = { text = "MIT" }

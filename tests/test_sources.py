@@ -170,6 +170,22 @@ class SourceAdapterTests(unittest.TestCase):
         FanartTvSource(webservice, "key").fetch(releases, lambda _candidates, _failures: None)
         self.assertEqual(3, len(webservice.calls))
 
+    def test_fanart_uses_the_configured_per_type_call_limit(self):
+        """The options-page value replaces fanart.tv's historical fixed limit."""
+        releases = []
+        for index in range(3):
+            candidate = _release()
+            candidate["id"] = "release-%d" % index
+            candidate["release-group"] = {"id": "group-%d" % index}
+            candidate["artist-credit"] = [{"artist": {"id": "artist-%d" % index}}]
+            releases.append(candidate)
+        webservice = _WebService()
+        FanartTvSource(webservice, "key", max_calls_per_type=1).fetch(
+            releases,
+            lambda _candidates, _failures: None,
+        )
+        self.assertEqual(1, len(webservice.calls))
+
     def test_discogs_requires_exact_musicbrainz_relation(self):
         """Discogs IDs come from explicit release relations, never title guessing."""
         self.assertEqual("12345", discogs_release_id(_release()))
@@ -217,6 +233,23 @@ class SourceAdapterTests(unittest.TestCase):
         webservice = _WebService()
         DiscogsSource(webservice, "token").fetch(releases, lambda _candidates, _failures: None)
         self.assertEqual(3, len(webservice.calls))
+
+    def test_discogs_uses_the_configured_per_type_call_limit(self):
+        """The options-page value replaces Discogs' historical fixed limit."""
+        releases = []
+        for index in range(3):
+            candidate = _release()
+            candidate["id"] = "release-%d" % index
+            candidate["relations"] = [{
+                "url": {"resource": "https://www.discogs.com/release/%d-Example" % (100 + index)},
+            }]
+            releases.append(candidate)
+        webservice = _WebService()
+        DiscogsSource(webservice, "token", max_calls_per_type=2).fetch(
+            releases,
+            lambda _candidates, _failures: None,
+        )
+        self.assertEqual(2, len(webservice.calls))
 
 
 if __name__ == "__main__":

@@ -43,6 +43,13 @@ class MultipleCoverDeliveryTests(unittest.TestCase):
             self.source,
         )
 
+    def test_api_call_count_is_clamped_between_one_and_ten(self):
+        """The provider must protect every source from invalid persisted limits."""
+        self.assertIn(
+            "min(10, max(1, config.setting[MAX_CALLS_PER_TYPE_KEY]))",
+            self.source,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
