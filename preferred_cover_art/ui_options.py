@@ -72,7 +72,10 @@ class Ui_PreferredCoverArtOptionsPage:
         self.number_of_covers = QtWidgets.QSpinBox(scoring_group)
         self.number_of_covers.setRange(1, 10)
         self.number_of_covers.setMinimumWidth(110)
-        scoring_layout.addRow("Covers to return per song:", self.number_of_covers)
+        covers_label = QtWidgets.QLabel("Covers to return per song:", scoring_group)
+        covers_label.setWordWrap(False)
+        covers_label.setMinimumWidth(210)
+        scoring_layout.addRow(covers_label, self.number_of_covers)
         layout.addWidget(scoring_group)
 
         sources_group = QtWidgets.QGroupBox("Additional artwork sources", page)

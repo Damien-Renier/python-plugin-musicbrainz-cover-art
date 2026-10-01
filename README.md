@@ -108,28 +108,42 @@ from the others.
 API keys are visible in the configuration page, stored in Picard's settings,
 and sent in HTTP headers rather than being included in request URLs.
 
-## Configuration
+## Configuration and runtime impact
 
 Open **Options > Plugins > Preferred Cover Art** in Picard.
 
-- **Release types:** enable the types that may be considered and move them into
-  your preferred order. Single, EP, Album, Compilation, and Soundtrack are
-  enabled by default. Disabled types are not queried.
-- **Avoid Various Artists:** exclude Various Artists releases before selection.
-  It is enabled by default and uses Picard's configured Various Artists identity.
-- **Preferred dimensions:** set the target width and height. The defaults are
-  1200 × 1200 pixels.
-- **Preferred ratio tolerance:** control how far an image may deviate from the
-  target shape before losing image-quality preference. The default is 10%.
-- **Maximum calls per provider and enabled type:** choose between 1 and 10. The
-  default is 3 and applies independently to Cover Art Archive, fanart.tv, and
-  Discogs.
-- **Covers to return per song:** choose between 1 and 10. The default is 1.
-- **Discogs:** independently enable the source and enter its API key.
-- **fanart.tv:** independently enable the source and enter its API key.
+![Preferred Cover Art settings, with the sections numbered 1 to 5](ui-details.png)
 
-Country and medium priorities come from Picard's **Metadata > Preferred
-Releases** settings.
+The numbers in the screenshot identify these settings and their effect while
+the plugin runs:
+
+1. **Various Artists:** when enabled, the plugin removes releases credited to
+   Picard's configured Various Artists identity before ranking or requesting
+   artwork. This reduces irrelevant candidates and can avoid network requests;
+   disable it if Various Artists compilations are valid results for you.
+2. **Cover dimensions and ratio:** the width and height define the ideal image
+   size (1200 × 1200 pixels by default), while the tolerance controls how far an
+   image's aspect ratio may differ from that target before its quality score is
+   reduced. These settings only affect ranking: they do not resize, crop, reject,
+   or download additional images. Images at or above the target size receive no
+   extra size advantage.
+3. **Scoring:** **Maximum calls per provider and enabled type** (1–10, default
+   3) limits how many selected releases each artwork provider may query for each
+   enabled release type. Increasing it may find more artwork, but causes more
+   network requests and can make lookups slower. **Covers to return per song**
+   (1–10, default 1) controls how many of the final ranked, de-duplicated images
+   Picard receives; increasing it does not increase the provider request limit.
+4. **Additional artwork sources:** enable Discogs and/or fanart.tv and supply the
+   corresponding API key to search those services in addition to the always-on
+   Cover Art Archive. Each enabled service adds network requests and may increase
+   lookup time. A missing key keeps that optional source inactive, and a failure
+   in one source does not discard results from the others.
+5. **Preferred release types:** checked types are eligible for lookup; unchecked
+   types are ignored. Move a type upward to give it a higher ranking weight.
+   Enabling more types broadens the search and can increase requests and runtime,
+   especially when the maximum-calls setting is high. Country and medium
+   priorities continue to come from Picard's **Metadata > Preferred Releases**
+   settings.
 
 ## Installation
 
