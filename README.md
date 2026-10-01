@@ -110,7 +110,14 @@ and sent in HTTP headers rather than being included in request URLs.
 
 ## Configuration and runtime impact
 
-Open **Options > Plugins > Preferred Cover Art** in Picard.
+First, open **Options > Cover Art** in Picard, enable **Preferred Cover Art**,
+and use **Reorder Priority** to move it to the top of the **Cover Art Providers**
+list. This makes Picard ask the plugin before lower-priority providers; leaving
+another provider above it may cause that provider's result to be selected first.
+
+![Preferred Cover Art enabled at the top of Picard's provider list](UI-details-2.png)
+
+Then open **Options > Plugins > Preferred Cover Art** to configure the plugin.
 
 ![Preferred Cover Art settings, with the sections numbered 1 to 5](ui-details.png)
 
