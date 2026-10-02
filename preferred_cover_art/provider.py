@@ -507,7 +507,16 @@ class PreferredCoverArtProvider(CoverArtProvider):
                 queued_count += 1
                 queued_urls.add(url)
                 comment = COVER_COMMENT_TEMPLATE.format(rank=queued_count, score=scores["total"])
-                cover = CoverArtImage(url, types=["front"], comment=comment)
+                # Picard skips additional images from type-less providers once
+                # it has found a front image.  Declare explicit type support so
+                # every ranked front image up to the configured limit remains
+                # eligible for download.
+                cover = CoverArtImage(
+                    url,
+                    types=["front"],
+                    comment=comment,
+                    support_types=True,
+                )
                 cover.is_front = True
                 self.queue_put(cover)
                 if debug_logs:

@@ -50,6 +50,20 @@ class MultipleCoverDeliveryTests(unittest.TestCase):
             self.source,
         )
 
+    def test_returned_covers_declare_explicit_type_support(self):
+        """Picard must not discard later ranked covers as type-less sources."""
+        calls = [
+            node
+            for node in ast.walk(self.tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "CoverArtImage"
+        ]
+        self.assertEqual(1, len(calls))
+        keywords = {keyword.arg: keyword.value for keyword in calls[0].keywords}
+        self.assertIn("support_types", keywords)
+        self.assertIs(True, ast.literal_eval(keywords["support_types"]))
+
 
 if __name__ == "__main__":
     unittest.main()
